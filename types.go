@@ -24,10 +24,14 @@ type TimerMap struct {
 }
 
 // Input event type
-type TimeoutEvent struct {
+type RegisterEvent struct {
 	EventID     string `json:"event_id"`
 	TimeoutSecs int    `json:"timeout_seconds"`
 	Emit        string `json:"emit"`
+}
+
+type RegisterResponse struct {
+	Message string `json:"message"`
 }
 
 // Input event type

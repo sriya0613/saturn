@@ -5,26 +5,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 type Timer struct {
 	State *TimerMap
 	SysWg sync.WaitGroup
 
-	WebhookUrl string
+	Logger      zerolog.Logger
+
+	// JsonLogPath string
+	WebhookUrl  string
 }
 
-func CreateTimer(WebhookUrl string) Timer {
+func CreateTimer(WebhookUrl string, logDir string) Timer {
 	state := TimerMap{}
 	state.TimerMap = make(map[string]TimerMapValue)
+
+	consoleLogger := zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: time.RFC3339,
+	}
+
+	err := os.MkdirAll(logDir, 0777)
+	if err != nil {
+		// consoleLogger.Error().Msg("Could not create log directory")
+		panic(err)
+	}
+
+	logRoot, err := os.OpenRoot(logDir)
+	if err != nil {
+		// consoleLogger.Panic().Msg("Could not open log directory")
+		panic("Could not open log directory")
+	}
+
+	logFile := fmt.Sprintf("log-%d.json", time.Now().Unix())
+	jsonLogFile, err := logRoot.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
+	if err != nil {
+		panic("Could not open file")
+	}
+
+	multiLogger := zerolog.MultiLevelWriter(consoleLogger, jsonLogFile)
+
 	return Timer{
 		State:      &state,
 		SysWg:      sync.WaitGroup{},
 		WebhookUrl: WebhookUrl,
+
+		Logger: zerolog.New(multiLogger).With().Timestamp().Caller().Logger(),
 	}
 }
 
@@ -32,107 +65,137 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
-	}
-	var request TimeoutEvent
-	err = json.Unmarshal(body, &request)
-	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Msg("Something broke")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Could not read request body"))
+		return
 	}
 
-	log.Printf("Recieved request -> ID %s TIMEOUT %d EMIT %s\n", request.EventID, request.TimeoutSecs, request.Emit)
+	var request RegisterEvent
+	err = json.Unmarshal(body, &request)
+	if err != nil {
+		t.Logger.Error().Err(err).Msg("Request data not to format")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Request data not to format"))
+		return
+	}
+
+	t.Logger.Info().Str("event_id", request.EventID).Int("timeout_secs", request.TimeoutSecs).
+		Str("emit_msg", request.Emit).Msg("Received register request")
 
 	// validate the request
 	if time.Duration(request.TimeoutSecs)*time.Second > MaxTimeoutSeconds || request.TimeoutSecs <= 0 {
-		log.Println(fmt.Errorf("Duration of %d is illegal!", request.TimeoutSecs))
-		extendReponseBytes, err := json.Marshal(TimeoutResponse{
+		t.Logger.Warn().Msg(fmt.Sprintf("Duration of %d is illegal!", request.TimeoutSecs))
+		extendResponseBytes, err := json.Marshal(TimeoutResponse{
 			EventID: request.EventID,
 			Message: fmt.Sprintf("Illegal duration of %d seconds", request.TimeoutSecs),
 		})
 
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v\n", err))
+			t.Logger.Error().Err(err).Msg("Failed to marshal body of request")
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to marshal body of request"))
 			return
 		}
 
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(extendReponseBytes)
-
+		w.Write(extendResponseBytes)
 		return
 	}
 
 	// Fire off the goroutine
-	t.SysWg.Add(1)
-	go func() {
-		defer t.SysWg.Done()
 
-		t.State.Lock()
+	t.State.Lock()
 
-		_, ok := t.State.TimerMap[request.EventID]
-		// this would mean that an existing event with
-		// request.EventID already has a timer attached
-		// with it
-		if ok {
-			log.Printf("Existing timer attached with event %s\n", request.EventID)
-			t.State.Unlock()
-			// BUG:
-			// w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("Existing timer attached with event %s", request.EventID)))
-			return
-		}
-
-		timeInitiated := time.Now()
-
-		cancelInstance := time.AfterFunc(time.Duration(request.TimeoutSecs)*time.Second, func() {
-			log.Println("Emitting Event -> ", request)
-			// Make the webhook call with emit
-			response := TimeoutMessage{
-				EventID:       request.EventID,
-				Message:       request.Emit,
-				TimeInitiated: timeInitiated.String(),
-			}
-			response_bytes, err := json.Marshal(response)
-			if err != nil {
-				log.Printf("Something went wrong -> %v\n", err)
-			}
-
-			t.State.Lock()
-			delete(t.State.TimerMap, request.EventID)
-			t.State.Unlock()
-
-			// TODO better error handling and logging
-			_, err = http.Post(*&t.WebhookUrl, "application/json", bytes.NewReader(response_bytes))
-			if err != nil {
-				log.Printf("Something went wrong -> %v\n", err)
-			}
-			log.Printf("Completion of event_id %s sent to WebHook URL %s", request.EventID, *&t.WebhookUrl)
-		})
-
-		t.State.TimerMap[request.EventID] = TimerMapValue{
-			timer:    cancelInstance,
-			duration: time.Duration(request.TimeoutSecs) * time.Second,
-			initTime: timeInitiated,
-		}
+	_, ok := t.State.TimerMap[request.EventID]
+	// this would mean that an existing event with
+	// request.EventID already has a timer attached
+	// with it
+	if ok {
+		t.Logger.Warn().Str("event_id", request.EventID).Msg("Existing timer attached with event")
 		t.State.Unlock()
-	}()
+		// BUG:
+		registerResponseBytes, _ := json.Marshal(TimeoutResponse{
+			EventID: request.EventID,
+			Message: fmt.Sprintf("Existing timer attached with event %s", request.EventID),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(registerResponseBytes)
+		return
+	}
 
+	timeInitiated := time.Now()
+
+	cancelInstance := time.AfterFunc(time.Duration(request.TimeoutSecs)*time.Second, func() {
+		t.State.Lock()
+		defer t.State.Unlock()
+
+		t.Logger.Info().Str("event_id", request.EventID).Int("timeout_secs", request.TimeoutSecs).
+			Str("emit_msg", request.Emit).Str("webhook_url", t.WebhookUrl).
+			Msg("Timer event firing to webhook")
+
+		// Make the webhook call with emit
+		response := TimeoutMessage{
+			EventID:       request.EventID,
+			Message:       request.Emit,
+			TimeInitiated: timeInitiated.String(),
+		}
+		response_bytes, err := json.Marshal(response)
+		if err != nil {
+			// log.Printf("Something went wrong -> %v\n", err)
+
+			t.Logger.Error().Err(err).Send()
+		}
+
+		delete(t.State.TimerMap, request.EventID)
+
+		// TODO better error handling and logging
+		_, err = http.Post(t.WebhookUrl, "application/json", bytes.NewReader(response_bytes))
+		if err != nil {
+			t.Logger.Error().Err(err).Msg("Could not send response to webhook")
+		}
+		t.Logger.Info().Str("event_id", request.EventID).Str("webhook_url", t.WebhookUrl).
+			Msg("Timer completed, sent to webhook")
+	})
+
+	t.State.TimerMap[request.EventID] = TimerMapValue{
+		timer:    cancelInstance,
+		duration: time.Duration(request.TimeoutSecs) * time.Second,
+		initTime: timeInitiated,
+	}
+	t.State.Unlock()
+
+	registerResponseBytes, _ := json.Marshal(TimeoutResponse{
+		EventID: request.EventID,
+		Message: fmt.Sprintf("Created event with event ID %s", request.EventID),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(registerResponseBytes)
 }
+
 func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 
 	// parse all the arguments
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Msg("Something broke")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Could not read request body"))
+		return
 	}
 	var request CancelEvent
 	err = json.Unmarshal(body, &request)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Msg("Request data not to format")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Request data not to format"))
+		return
 	}
 
-	log.Printf("Recieved cancel request -> ID %s\n", request.EventID)
+	t.Logger.Info().Str("event_id", request.EventID).Msg("Received cancel request")
 
 	t.State.Lock()
 
@@ -140,13 +203,17 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		t.State.Unlock()
 
+		t.Logger.Error().Str("event_id", request.EventID).Msg("No event has been registered")
+
 		cancelResponse, err := json.Marshal(&CancelResponse{
 			EventID: request.EventID,
 			Message: fmt.Sprintf("No event with event_id %s has been registered", request.EventID),
 		})
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 		}
+
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write(cancelResponse)
 		return
@@ -159,36 +226,43 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 		t.State.Unlock()
 		// NOTE:
 		// Failed to get an event with EventID
-		cancelResposne, err := json.Marshal(&CancelResponse{
+		t.Logger.Warn().Str("event_id", request.EventID).Msg("Event has already been stopped")
+
+		cancelResponse, err := json.Marshal(&CancelResponse{
 			Message: fmt.Sprintf("Event with event_id %s has already been stopped", request.EventID),
 		})
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 		}
+
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(cancelResposne)
+		w.Write(cancelResponse)
 		return
 	} else {
 		delete(t.State.TimerMap, request.EventID)
 		t.State.Unlock()
 	}
 
+	t.Logger.Info().Str("event_id", request.EventID).Msg("Sucessfully cancelled event")
 	cancelResponseBytes, err := json.Marshal(&CancelResponse{
 		EventID: request.EventID,
 		Message: fmt.Sprintf("Cancelled event with event_id %s", request.EventID),
 	})
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Send()
 	}
 
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(cancelResponseBytes)
 }
+
 func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
-		w.WriteHeader(http.StatusInternalServerError)
+		t.Logger.Error().Err(err).Send()
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Failed to read body of request"))
 		return
 	}
@@ -196,18 +270,21 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 	var request RemainingEvent
 	err = json.Unmarshal(body, &request)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
-		w.WriteHeader(http.StatusInternalServerError)
+		t.Logger.Error().Err(err).Send()
+		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Failed to unmarshal request json"))
 		return
 	}
+
+	t.Logger.Info().Str("event_id", request.EventID).Msg("Received remaining request")
+
 
 	t.State.Lock()
 
 	if timerMapValue, ok := t.State.TimerMap[request.EventID]; !ok {
 		t.State.Unlock()
 
-		log.Printf("No associated timer with event_id %s\n", request.EventID)
+		t.Logger.Error().Str("event_id", request.EventID).Msg("No associated timer found")
 
 		remainingResponse, err := json.Marshal(RemainingResponse{
 			EventID: request.EventID,
@@ -215,17 +292,18 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to marshal body of request"))
 			return
 		}
 
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write(remainingResponse)
 	} else {
-
-		diff := time.Now().Sub(timerMapValue.initTime)
+		// diff := time.Now().Sub(timerMapValue.initTime)
+		diff := time.Since(timerMapValue.initTime)
 		remaining := t.State.TimerMap[request.EventID].duration - diff
 
 		t.State.Unlock()
@@ -233,17 +311,21 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 		response := RemainingResponse{
 			EventID:       request.EventID,
 			TimeRemaining: remaining.String(),
-			Message:       fmt.Sprintf("Remaining time for event_id %s is %s", request.EventID, remaining.String()),
+			Message:       fmt.Sprintf("Remaining time for event_id %s is %s",
+				request.EventID,
+				remaining.String(),
+			),
 		}
 
 		responseBytes, err := json.Marshal(response)
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to marshal body of request"))
 			return
 		}
 
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(responseBytes)
 	}
@@ -255,9 +337,9 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to read extend event request body"))
+		t.Logger.Error().Err(err).Msg("Something broke")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Could not read request body"))
 		return
 	}
 
@@ -265,13 +347,14 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = json.Unmarshal(body, &request)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to unmarshal extend event request json"))
+		t.Logger.Error().Err(err).Msg("Request data not to format")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Request data not to format"))
 		return
 	}
 
-	log.Printf("Recieved extend event ID %s with extended timeout %d\n", request.EventID, request.TimeoutSecs)
+	t.Logger.Info().Str("event_id", request.EventID).Int("timeout_secs", request.TimeoutSecs).
+		Msg("Received extend request")
 
 	t.State.Lock()
 
@@ -280,24 +363,26 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 	if cancelTimerHandle, ok := t.State.TimerMap[request.EventID]; !ok {
 		t.State.Unlock()
 
+		t.Logger.Error().Str("event_id", request.EventID).Msg("No evetn has been registered")
 		extendResponse, err := json.Marshal(&ExtendResponse{
 			EventID: request.EventID,
 			Message: fmt.Sprintf("No event with event_id %s has been registered", request.EventID),
 		})
 
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to marshal body of request"))
 			return
 		}
 
+		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write(extendResponse)
 		return
 	} else {
-
-		diff := time.Now().Sub(cancelTimerHandle.initTime)
+		// diff := time.Now().Sub(cancelTimerHandle.initTime)
+		diff := time.Since(cancelTimerHandle.initTime)
 		remaining := t.State.TimerMap[request.EventID].duration - diff
 		extraDuration := time.Duration(request.TimeoutSecs) * time.Second
 
@@ -305,21 +390,22 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 
 		if extendedDuration > MaxTimeoutSeconds || request.TimeoutSecs <= 0 {
 			t.State.Unlock()
-			log.Println(fmt.Errorf("Duration of %d is illegal!", request.TimeoutSecs))
-			extendReponseBytes, err := json.Marshal(ExtendResponse{
+			t.Logger.Error().Int("duration", request.TimeoutSecs).Msg("Illegal Timeout Duration")
+			extendResponseBytes, err := json.Marshal(ExtendResponse{
 				EventID: request.EventID,
 				Message: fmt.Sprintf("Illegal duration of %d seconds", request.TimeoutSecs),
 			})
 
 			if err != nil {
-				log.Println(fmt.Errorf("Something broke -> %v\n", err))
+				t.Logger.Error().Err(err)
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte("Failed to marshal body of request"))
 				return
 			}
 
+			w.Header().Add("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write(extendReponseBytes)
+			w.Write(extendResponseBytes)
 
 			return
 		}
@@ -336,11 +422,14 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 
 		extendEventResponse, err := json.Marshal(&ExtendResponse{
 			EventID: request.EventID,
-			Message: fmt.Sprintf("Extended timer for event_id %s with duration %s", request.EventID, extendedDuration.String()),
+			Message: fmt.Sprintf("Extended timer for event_id %s with duration %s",
+				request.EventID,
+				extendedDuration.String(),
+			),
 		})
 
 		if err != nil {
-			log.Println(fmt.Errorf("Something broke -> %v", err))
+			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Failed to marshal body of request"))
 			return
@@ -356,7 +445,7 @@ func (t *Timer) WebhookTest(w http.ResponseWriter, r *http.Request) {
 	// parse all the arguments
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Send()
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Failed to marshal body of request"))
 		return
@@ -365,12 +454,12 @@ func (t *Timer) WebhookTest(w http.ResponseWriter, r *http.Request) {
 	var request TimeoutMessage
 	err = json.Unmarshal(body, &request)
 	if err != nil {
-		log.Println(fmt.Errorf("Something broke -> %v", err))
+		t.Logger.Error().Err(err).Send()
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Failed to marshal body of request"))
 		return
 	}
 
-	log.Printf("Recieved webhook request -> ID %s Message -> %s\n", request.EventID, request.Message)
-
+	t.Logger.Info().Str("event_id", request.EventID).Str("message", request.Message).
+		Msg("Received webhook request")
 }
