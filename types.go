@@ -19,8 +19,8 @@ type TimerMapValue struct {
 type TimerMap struct {
 	sync.Mutex
 	// This is the actual map that contains the list of timer objects
-	TimerMap   map[string]TimerMapValue
-	cancelList []string
+	TimerMap map[string]TimerMapValue
+	// cancelList []string
 }
 
 // Input event type
@@ -78,4 +78,4 @@ type ExtendResponse struct {
 }
 
 // global constants
-const MaxTimeoutSeconds = time.Duration(60 * 120) * time.Second
+const MaxTimeout = time.Duration(60*120) * time.Second

@@ -17,10 +17,9 @@ type Timer struct {
 	State *TimerMap
 	SysWg sync.WaitGroup
 
-	Logger      zerolog.Logger
+	Logger zerolog.Logger
 
-	// JsonLogPath string
-	WebhookUrl  string
+	WebhookUrl string
 }
 
 func CreateTimer(WebhookUrl string, logDir string) Timer {
@@ -34,13 +33,11 @@ func CreateTimer(WebhookUrl string, logDir string) Timer {
 
 	err := os.MkdirAll(logDir, 0777)
 	if err != nil {
-		// consoleLogger.Error().Msg("Could not create log directory")
 		panic(err)
 	}
 
 	logRoot, err := os.OpenRoot(logDir)
 	if err != nil {
-		// consoleLogger.Panic().Msg("Could not open log directory")
 		panic("Could not open log directory")
 	}
 
@@ -62,12 +59,11 @@ func CreateTimer(WebhookUrl string, logDir string) Timer {
 }
 
 func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse JSON
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Something broke")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Could not read request body"))
+		_, _ = w.Write([]byte("Could not read request body"))
 		return
 	}
 
@@ -76,15 +72,14 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Request data not to format")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Request data not to format"))
+		_, _ = w.Write([]byte("Request data not to format"))
 		return
 	}
 
 	t.Logger.Info().Str("event_id", request.EventID).Int("timeout_secs", request.TimeoutSecs).
 		Str("emit_msg", request.Emit).Msg("Received register request")
 
-	// validate the request
-	if time.Duration(request.TimeoutSecs)*time.Second > MaxTimeoutSeconds || request.TimeoutSecs <= 0 {
+	if time.Duration(request.TimeoutSecs)*time.Second > MaxTimeout || request.TimeoutSecs <= 0 {
 		t.Logger.Warn().Msg(fmt.Sprintf("Duration of %d is illegal!", request.TimeoutSecs))
 		extendResponseBytes, err := json.Marshal(TimeoutResponse{
 			EventID: request.EventID,
@@ -92,15 +87,15 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if err != nil {
-			t.Logger.Error().Err(err).Msg("Failed to marshal body of request")
+			t.Logger.Error().Err(err).Msg("Failed to marshal response")
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal body of request"))
+			_, _ = w.Write([]byte("Failed to marshal response"))
 			return
 		}
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(extendResponseBytes)
+		_, _ = w.Write(extendResponseBytes)
 		return
 	}
 
@@ -122,7 +117,7 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(registerResponseBytes)
+		_, _ = w.Write(registerResponseBytes)
 		return
 	}
 
@@ -144,8 +139,6 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		response_bytes, err := json.Marshal(response)
 		if err != nil {
-			// log.Printf("Something went wrong -> %v\n", err)
-
 			t.Logger.Error().Err(err).Send()
 		}
 
@@ -173,17 +166,15 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(registerResponseBytes)
+	_, _ = w.Write(registerResponseBytes)
 }
 
 func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
-
-	// parse all the arguments
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Something broke")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Could not read request body"))
+		_, _ = w.Write([]byte("Could not read request body"))
 		return
 	}
 	var request CancelEvent
@@ -191,7 +182,7 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Request data not to format")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Request data not to format"))
+		_, _ = w.Write([]byte("Request data not to format"))
 		return
 	}
 
@@ -215,7 +206,7 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(cancelResponse)
+		_, _ = w.Write(cancelResponse)
 		return
 	}
 
@@ -224,8 +215,7 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 	// not deleted .Stop() retunrs a false boolean value
 	if !timerStopRequest {
 		t.State.Unlock()
-		// NOTE:
-		// Failed to get an event with EventID
+		// NOTE: Failed to get an event with EventID
 		t.Logger.Warn().Str("event_id", request.EventID).Msg("Event has already been stopped")
 
 		cancelResponse, err := json.Marshal(&CancelResponse{
@@ -237,7 +227,7 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(cancelResponse)
+		_, _ = w.Write(cancelResponse)
 		return
 	} else {
 		delete(t.State.TimerMap, request.EventID)
@@ -255,7 +245,7 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(cancelResponseBytes)
+	_, _ = w.Write(cancelResponseBytes)
 }
 
 func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +253,7 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Logger.Error().Err(err).Send()
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Failed to read body of request"))
+		_, _ = w.Write([]byte("Failed to read body of request"))
 		return
 	}
 
@@ -272,12 +262,11 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Logger.Error().Err(err).Send()
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Failed to unmarshal request json"))
+		_, _ = w.Write([]byte("Failed to unmarshal request json"))
 		return
 	}
 
 	t.Logger.Info().Str("event_id", request.EventID).Msg("Received remaining request")
-
 
 	t.State.Lock()
 
@@ -294,13 +283,13 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal body of request"))
+			_, _ = w.Write([]byte("Failed to marshal response"))
 			return
 		}
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(remainingResponse)
+		_, _ = w.Write(remainingResponse)
 	} else {
 		// diff := time.Now().Sub(timerMapValue.initTime)
 		diff := time.Since(timerMapValue.initTime)
@@ -311,7 +300,7 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 		response := RemainingResponse{
 			EventID:       request.EventID,
 			TimeRemaining: remaining.String(),
-			Message:       fmt.Sprintf("Remaining time for event_id %s is %s",
+			Message: fmt.Sprintf("Remaining time for event_id %s is %s",
 				request.EventID,
 				remaining.String(),
 			),
@@ -321,25 +310,22 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal body of request"))
+			_, _ = w.Write([]byte("Failed to marshal response"))
 			return
 		}
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+		_, _ = w.Write(responseBytes)
 	}
 }
 
-// NOTE:
-// elimintate a 3 round trips for
-// remaining -> cancel -> register
 func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Something broke")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Could not read request body"))
+		_, _ = w.Write([]byte("Could not read request body"))
 		return
 	}
 
@@ -349,7 +335,7 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Logger.Error().Err(err).Msg("Request data not to format")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Request data not to format"))
+		_, _ = w.Write([]byte("Request data not to format"))
 		return
 	}
 
@@ -372,23 +358,22 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal body of request"))
+			_, _ = w.Write([]byte("Failed to marshal response"))
 			return
 		}
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(extendResponse)
+		_, _ = w.Write(extendResponse)
 		return
 	} else {
-		// diff := time.Now().Sub(cancelTimerHandle.initTime)
 		diff := time.Since(cancelTimerHandle.initTime)
 		remaining := t.State.TimerMap[request.EventID].duration - diff
 		extraDuration := time.Duration(request.TimeoutSecs) * time.Second
 
 		extendedDuration := remaining + extraDuration
 
-		if extendedDuration > MaxTimeoutSeconds || request.TimeoutSecs <= 0 {
+		if extendedDuration > MaxTimeout || request.TimeoutSecs <= 0 {
 			t.State.Unlock()
 			t.Logger.Error().Int("duration", request.TimeoutSecs).Msg("Illegal Timeout Duration")
 			extendResponseBytes, err := json.Marshal(ExtendResponse{
@@ -399,13 +384,13 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				t.Logger.Error().Err(err)
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Failed to marshal body of request"))
+				_, _ = w.Write([]byte("Failed to marshal response"))
 				return
 			}
 
 			w.Header().Add("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write(extendResponseBytes)
+			_, _ = w.Write(extendResponseBytes)
 
 			return
 		}
@@ -431,23 +416,21 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to marshal body of request"))
+			_, _ = w.Write([]byte("Failed to marshal response"))
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write(extendEventResponse)
+		_, _ = w.Write(extendEventResponse)
 	}
 }
 
 func (t *Timer) WebhookTest(w http.ResponseWriter, r *http.Request) {
-
-	// parse all the arguments
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Logger.Error().Err(err).Send()
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to marshal body of request"))
+		_, _ = w.Write([]byte("Failed to read body of request"))
 		return
 	}
 
@@ -455,8 +438,6 @@ func (t *Timer) WebhookTest(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal(body, &request)
 	if err != nil {
 		t.Logger.Error().Err(err).Send()
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to marshal body of request"))
 		return
 	}
 

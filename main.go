@@ -16,7 +16,6 @@ func main() {
 	LOG_DIR_JSON := flag.String("log_dir", "./logs/", "directory for logger")
 	flag.Parse()
 
-
 	mux := http.NewServeMux()
 	timer := CreateTimer(*WEBHOOK_URL, *LOG_DIR_JSON)
 
@@ -46,7 +45,7 @@ func main() {
 		responseBytes, _ := json.Marshal(response)
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBytes)
+		_, _ = w.Write(responseBytes)
 	})
 
 	// placeholder for the webhook
