@@ -349,7 +349,7 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 	if cancelTimerHandle, ok := t.State.TimerMap[request.EventID]; !ok {
 		t.State.Unlock()
 
-		t.Logger.Error().Str("event_id", request.EventID).Msg("No evetn has been registered")
+		t.Logger.Error().Str("event_id", request.EventID).Msg("No event has been registered")
 		extendResponse, err := json.Marshal(&ExtendResponse{
 			EventID: request.EventID,
 			Message: fmt.Sprintf("No event with event_id %s has been registered", request.EventID),
@@ -363,7 +363,7 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusFailedDependency)
 		_, _ = w.Write(extendResponse)
 		return
 	} else {
