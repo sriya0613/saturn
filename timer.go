@@ -31,7 +31,7 @@ func CreateTimer(WebhookUrl string, logDir string) Timer {
 		TimeFormat: time.RFC3339,
 	}
 
-	err := os.MkdirAll(logDir, 0777)
+	err := os.MkdirAll(logDir, 0o777)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +42,7 @@ func CreateTimer(WebhookUrl string, logDir string) Timer {
 	}
 
 	logFile := fmt.Sprintf("log-%d.json", time.Now().Unix())
-	jsonLogFile, err := logRoot.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
+	jsonLogFile, err := logRoot.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o777)
 	if err != nil {
 		panic("Could not open file")
 	}
@@ -85,7 +85,6 @@ func (t *Timer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 			EventID: request.EventID,
 			Message: fmt.Sprintf("Illegal duration of %d seconds", request.TimeoutSecs),
 		})
-
 		if err != nil {
 			t.Logger.Error().Err(err).Msg("Failed to marshal response")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -230,8 +229,8 @@ func (t *Timer) CancelHandler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(cancelResponse)
 		return
 	} else {
-		delete(t.State.TimerMap, request.EventID)
 		t.State.Unlock()
+		delete(t.State.TimerMap, request.EventID)
 	}
 
 	t.Logger.Info().Str("event_id", request.EventID).Msg("Sucessfully cancelled event")
@@ -279,7 +278,6 @@ func (t *Timer) RemainingHandler(w http.ResponseWriter, r *http.Request) {
 			EventID: request.EventID,
 			Message: fmt.Sprintf("No associated timer with event_id %s", request.EventID),
 		})
-
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
@@ -354,7 +352,6 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 			EventID: request.EventID,
 			Message: fmt.Sprintf("No event with event_id %s has been registered", request.EventID),
 		})
-
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
@@ -380,7 +377,6 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 				EventID: request.EventID,
 				Message: fmt.Sprintf("Illegal duration of %d seconds", request.TimeoutSecs),
 			})
-
 			if err != nil {
 				t.Logger.Error().Err(err)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -412,7 +408,6 @@ func (t *Timer) ExtendHandler(w http.ResponseWriter, r *http.Request) {
 				extendedDuration.String(),
 			),
 		})
-
 		if err != nil {
 			t.Logger.Error().Err(err).Send()
 			w.WriteHeader(http.StatusInternalServerError)
