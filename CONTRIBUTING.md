@@ -115,41 +115,7 @@ git checkout -b issue-<number>-<short-description>
 - Follow the existing code style
 - Add comments for complex logic
 
-### 4. Write Tests
 
-Every contribution **must** include tests:
-
-```go
-// Example test structure
-func TestYourFeature(t *testing.T) {
-    // Setup
-    timer := CreateTimer("http://localhost:3000/webhook", "./test-logs/")
-
-    // Test logic
-    // ...
-
-    // Assertions
-    if got != want {
-        t.Errorf("got %v, want %v", got, want)
-    }
-}
-```
-
-### 5. Run Tests Locally
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with race detection (IMPORTANT for bug fixes!)
-go test -race ./...
-
-# Run specific test
-go test -run TestYourFeature
-
-# Run with verbose output
-go test -v ./...
-```
 
 ### 6. Commit Your Changes
 
@@ -237,49 +203,8 @@ Then create a PR on GitHub with:
 - Return JSON responses with consistent structure
 - Include error messages in responses
 
-## 🧪 Testing Guidelines
 
-### Test Requirements
 
-Every PR must include:
-
-1. **Unit Tests** for new functions
-2. **Integration Tests** for API endpoints
-3. **Race Tests** for concurrent code (run with `-race`)
-4. **Edge Case Tests** for error conditions
-
-### Writing Good Tests
-
-```go
-func TestRegisterHandler(t *testing.T) {
-    // Setup
-    timer := CreateTimer("http://localhost:3000/webhook", "./test-logs/")
-
-    // Create test request
-    requestBody := RegisterEvent{
-        EventID:     "test-event-1",
-        TimeoutSecs: 10,
-        Emit:        "test message",
-    }
-    bodyBytes, _ := json.Marshal(requestBody)
-
-    req := httptest.NewRequest("POST", "/register", bytes.NewReader(bodyBytes))
-    w := httptest.NewRecorder()
-
-    // Execute
-    timer.RegisterHandler(w, req)
-
-    // Assert
-    if w.Code != http.StatusOK {
-        t.Errorf("Expected status 200, got %d", w.Code)
-    }
-
-    // Cleanup
-    timer.State.Lock()
-    delete(timer.State.TimerMap, "test-event-1")
-    timer.State.Unlock()
-}
-```
 
 ## ❓ Getting Help
 
@@ -291,29 +216,6 @@ func TestRegisterHandler(t *testing.T) {
 - **Saturn README**: [README.md](./README.md)
 - **Issue Details**: [HACKNIGHT_ISSUES.md](./HACKNIGHT_ISSUES.md)
 
-### Getting Support
 
-1. **Read the issue description** thoroughly
-2. **Check existing code** for similar patterns
-3. **Ask questions** in the PR comments
-4. **Review Go documentation** for language-specific questions
-
-### Debugging Tips
-
-1. **Use the logger**: Add debug logs to understand flow
-   ```go
-   t.Logger.Debug().Str("key", value).Msg("Debug message")
-   ```
-
-2. **Test in isolation**: Write small test cases for your logic
-
-3. **Use Go's race detector**: Catches concurrency bugs
-   ```bash
-   go test -race ./...
-   ```
-
-4. **Print state**: Debug by printing the timer map contents
-
-5. **Use Postman/curl**: Test API endpoints manually
 
 ## 🌟 Good Luck!
