@@ -1,7 +1,7 @@
+HACKNIGHT_ISSUES.md
 logs/
 *.log
 *.json
 
 saturn
-
 .DS_STORE
