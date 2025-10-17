@@ -1,0 +1,141 @@
+{
+    "info": {
+        "name": "Saturn API",
+        "_postman_id": "d8e8fca2-dc0f-4f1c-9d5f-123456789abc",
+        "description": "Postman collection for key Saturn API endpoints",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Test Server",
+            "request": {
+                "method": "GET",
+                "header": [
+                    {
+                        "key": "Accept",
+                        "value": "application/json"
+                    }
+                ],
+                "url": {
+                    "raw": "http://localhost:3000/test",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "test"
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Register Timer",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"duration\": 60,\n  \"name\": \"Focus Timer\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:3000/register",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "register"
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Check Remaining Time",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"event_id\": \"example-id\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:3000/remaining",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "remaining"
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Extend Timer",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"event_id\": \"example-id\",\n  \"duration\": 30\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:3000/extend",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "extend"
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Cancel Timer",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"event_id\": \"example-id\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:3000/cancel",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "3000",
+                    "path": [
+                        "cancel"
+                    ]
+                }
+            }
+        }
+    ]
+}
